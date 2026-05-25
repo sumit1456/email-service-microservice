@@ -70,6 +70,11 @@ class GenericEmailRequest(BaseModel):
 
 # ─── ENDPOINTS ──────────────────────────────────────────────────────────────
 
+@app.get("/ping", status_code=status.HTTP_200_OK)
+async def ping():
+    """Simple ping-pong endpoint to verify if the server is awake."""
+    return "pong"
+
 @app.get("/health", status_code=status.HTTP_200_OK)
 async def health_check():
     """Simple health-check endpoint to verify if the service is alive and configured."""
