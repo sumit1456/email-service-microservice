@@ -53,20 +53,12 @@ jobs:
           script: |
             # Pull the latest image we just pushed
             docker pull sumit067hatekar/email-service:latest
-            
-            # Stop the existing container if it is running
-            docker stop email-service || true
-            
-            # Remove the old container
-            docker rm email-service || true
-            
-            # Run the new container with production environment variables from GitHub Secrets
-            docker run -d \
-              --name email-service \
-              --restart always \
-              -p 8081:8081 \
-              -e BREVO_API_KEY="${{ secrets.BREVO_API_KEY }}" \
-              -e SENDER_EMAIL="${{ secrets.SENDER_EMAIL }}" \
-              -e SENDER_NAME="${{ secrets.SENDER_NAME }}" \
-              sumit067hatekar/email-service:latest
+
+            # Navigate to the infra directory where docker-compose.yml and .env live
+            cd ~/infra
+
+            # Restart only the email-service container using docker-compose
+            # --no-deps    → leaves Redis and RabbitMQ untouched
+            # --force-recreate → ensures a fresh container is always started
+            docker-compose up -d --no-deps --force-recreate email-service
 
