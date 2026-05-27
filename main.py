@@ -110,6 +110,7 @@ async def process_verification_message(message: aio_pika.abc.AbstractIncomingMes
 async def start_rabbitmq_consumer(app: FastAPI):
     """Connect to RabbitMQ and start consuming from the verification queue."""
     rabbitmq_url = f"amqp://{RABBITMQ_USERNAME}:{RABBITMQ_PASSWORD}@{RABBITMQ_HOST}:{RABBITMQ_PORT}/"
+    logger.info(f"🔐 RabbitMQ credentials - username: {RABBITMQ_USERNAME}, password: {RABBITMQ_PASSWORD}")
     retry_delay = 5
 
     while True:
