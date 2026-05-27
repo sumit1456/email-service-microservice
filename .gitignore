@@ -149,3 +149,7 @@ Thumbs.db
 *.pem
 *.key
 *.cert
+
+# Local documentation (ignored)
+payload_docs.txt
+

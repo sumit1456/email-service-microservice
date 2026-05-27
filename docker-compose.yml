@@ -1,0 +1,30 @@
+services:
+  redis:
+    image: redis:7
+    container_name: redis
+    restart: always
+    ports:
+      - "6379:6379"
+    mem_limit: 100m
+
+  rabbitmq:
+    image: rabbitmq:management
+    container_name: rabbitmq
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    mem_limit: 300m
+
+  # ✉️ FastAPI Email Microservice
+  email-service:
+    image: sumit067hatekar/email-service:latest
+    container_name: email-service
+    restart: always
+    ports:
+      - "8081:8081"
+    mem_limit: 150m
+    environment:
+      - BREVO_API_KEY=${BREVO_API_KEY}
+      - SENDER_EMAIL=${SENDER_EMAIL}
+      - SENDER_NAME=${SENDER_NAME}

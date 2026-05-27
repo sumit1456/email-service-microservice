@@ -1,4 +1,6 @@
 import os
+import json
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Optional, List
@@ -6,6 +8,7 @@ from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field
 import httpx
+import aio_pika
 from dotenv import load_dotenv
 
 # Configure logging with premium formatting
@@ -22,10 +25,119 @@ BREVO_API_KEY = os.getenv("BREVO_API_KEY")
 SENDER_EMAIL = os.getenv("SENDER_EMAIL", "sumithatekar9@gmail.com")
 SENDER_NAME = os.getenv("SENDER_NAME", "Resume Maker")
 
+# RabbitMQ Configuration
+RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "16.176.86.18")
+RABBITMQ_PORT = int(os.getenv("RABBITMQ_PORT", 5672))
+RABBITMQ_USERNAME = os.getenv("RABBITMQ_USERNAME", "guest")
+RABBITMQ_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "guest")
+RABBITMQ_QUEUE = os.getenv("RABBITMQ_QUEUE", "email_verification_queue")
+
 if not BREVO_API_KEY:
     logger.warning("BREVO_API_KEY is not defined in environment variables!")
 
-# Lifespan manager to manage the HTTP client lifecycle gracefully
+# ─── RABBITMQ CONSUMER ───────────────────────────────────────────────────────
+
+async def process_verification_message(message: aio_pika.abc.AbstractIncomingMessage, http_client: httpx.AsyncClient):
+    """Process a single verification message from RabbitMQ."""
+    async with message.process():
+        try:
+            body = json.loads(message.body.decode())
+            email = body.get("email")
+            token = body.get("token")
+
+            if not email or not token:
+                logger.error(f"❌ Invalid message payload (missing email or token): {body}")
+                return
+
+            logger.info(f"📬 Received verification message from RabbitMQ for: {email}")
+
+            # Build the verification link and HTML content
+            verify_link = f"http://localhost:5173/verify?token={token}"
+            html_content = f"""
+            <html>
+              <body style="font-family: Arial, sans-serif; background-color: #f8f9fa; margin: 0; padding: 0;">
+                <table width="100%" cellspacing="0" cellpadding="0" style="max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                  <tr>
+                    <td style="padding: 40px; text-align: center;">
+                      <h1 style="color: #1a73e8; font-size: 28px; margin-bottom: 20px;">Verify Your Email</h1>
+                      <p style="font-size: 18px; color: #333;">Hi there 👋,</p>
+                      <p style="font-size: 16px; color: #555;">
+                        Thank you for signing up with <strong>Resume Maker</strong>!<br>
+                        Please verify your email address to activate your account.
+                      </p>
+                      <p style="margin: 30px 0;">
+                        <a href="{verify_link}"
+                           style="background-color: #1a73e8; color: #fff; padding: 14px 28px; border-radius: 6px;
+                                  text-decoration: none; font-size: 18px; font-weight: bold;">
+                           Verify My Email
+                        </a>
+                      </p>
+                      <p style="font-size: 14px; color: #777;">
+                        This link will expire in 24 hours.<br>
+                        If you didn't create this account, you can safely ignore this message.
+                      </p>
+                      <hr style="margin: 30px 0; border: none; border-top: 1px solid #eee;">
+                      <p style="font-size: 13px; color: #aaa;">
+                        &copy; 2025 Resume Maker. All rights reserved.
+                      </p>
+                    </td>
+                  </tr>
+                </table>
+              </body>
+            </html>
+            """
+
+            brevo_payload = {
+                "sender": {"email": SENDER_EMAIL, "name": SENDER_NAME},
+                "to": [{"email": email}],
+                "subject": "Verify your Resume Maker account",
+                "htmlContent": html_content
+            }
+
+            response = await http_client.post("/smtp/email", json=brevo_payload)
+
+            if response.status_code in (200, 201, 202):
+                logger.info(f"✅ Verification email sent to {email}. Brevo Response: {response.text}")
+            else:
+                logger.error(f"❌ Brevo API rejected email for {email}. Code: {response.status_code}, Detail: {response.text}")
+
+        except json.JSONDecodeError:
+            logger.error(f"❌ Failed to decode RabbitMQ message body: {message.body}")
+        except Exception as e:
+            logger.error(f"❌ Error processing RabbitMQ message: {e}")
+
+
+async def start_rabbitmq_consumer(app: FastAPI):
+    """Connect to RabbitMQ and start consuming from the verification queue."""
+    rabbitmq_url = f"amqp://{RABBITMQ_USERNAME}:{RABBITMQ_PASSWORD}@{RABBITMQ_HOST}:{RABBITMQ_PORT}/"
+    retry_delay = 5
+
+    while True:
+        try:
+            logger.info(f"🐇 Connecting to RabbitMQ at {RABBITMQ_HOST}:{RABBITMQ_PORT}...")
+            connection = await aio_pika.connect_robust(rabbitmq_url)
+            channel = await connection.channel()
+            await channel.set_qos(prefetch_count=10)
+
+            queue = await channel.declare_queue(RABBITMQ_QUEUE, durable=True)
+            logger.info(f"✅ RabbitMQ consumer started. Listening on queue: '{RABBITMQ_QUEUE}'")
+
+            async with queue.iterator() as queue_iter:
+                async for message in queue_iter:
+                    await process_verification_message(message, app.state.http_client)
+
+        except aio_pika.exceptions.AMQPConnectionError as e:
+            logger.error(f"❌ RabbitMQ connection failed: {e}. Retrying in {retry_delay}s...")
+            await asyncio.sleep(retry_delay)
+        except asyncio.CancelledError:
+            logger.info("🛑 RabbitMQ consumer task cancelled. Shutting down...")
+            break
+        except Exception as e:
+            logger.error(f"❌ Unexpected RabbitMQ error: {e}. Retrying in {retry_delay}s...")
+            await asyncio.sleep(retry_delay)
+
+
+# Lifespan manager to manage the HTTP client and RabbitMQ consumer lifecycle
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize the async client with Brevo headers
@@ -39,10 +151,21 @@ async def lifespan(app: FastAPI):
         timeout=15.0
     )
     logger.info("🚀 HTTP Client for Brevo API successfully initialized.")
+
+    # Start the RabbitMQ consumer as a background task
+    consumer_task = asyncio.create_task(start_rabbitmq_consumer(app))
+    logger.info("🐇 RabbitMQ consumer background task launched.")
+
     yield
-    # Clean up and close client on shutdown
+
+    # Clean up: cancel consumer and close HTTP client
+    consumer_task.cancel()
+    try:
+        await consumer_task
+    except asyncio.CancelledError:
+        pass
     await app.state.http_client.aclose()
-    logger.info("🛑 HTTP Client successfully closed.")
+    logger.info("🛑 HTTP Client and RabbitMQ consumer successfully closed.")
 
 app = FastAPI(
     title="Independent Email Microservice",
