@@ -4,6 +4,7 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import Optional, List
+import secrets
 from fastapi import FastAPI, HTTPException, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, EmailStr, Field
@@ -30,7 +31,9 @@ RABBITMQ_HOST = os.getenv("RABBITMQ_HOST", "16.176.86.18")
 RABBITMQ_PORT = int(os.getenv("RABBITMQ_PORT", 5672))
 RABBITMQ_USERNAME = os.getenv("RABBITMQ_USERNAME", "guest")
 RABBITMQ_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "guest")
-RABBITMQ_QUEUE = os.getenv("RABBITMQ_QUEUE", "email_verification_queue")
+# Queue names for different purposes
+RABBITMQ_QUEUE_EMAIL_VERIFICATION = os.getenv("RABBITMQ_QUEUE_EMAIL_VERIFICATION", "email_verification_resumemaker")
+RABBITMQ_QUEUE_RESUMEMAKER = os.getenv("RABBITMQ_QUEUE_RESUMEMAKER", "email_verification_resumemaker")
 
 if not BREVO_API_KEY:
     logger.warning("BREVO_API_KEY is not defined in environment variables!")
@@ -52,7 +55,7 @@ async def process_verification_message(message: aio_pika.abc.AbstractIncomingMes
             logger.info(f"📬 Received verification message from RabbitMQ for: {email}")
 
             # Build the verification link and HTML content
-            verify_link = f"http://localhost:5173/verify?token={token}"
+            verify_link = f"https://resume-maker-pro.netlify.app/verify?token={token}"
             html_content = f"""
             <html>
               <body style="font-family: Arial, sans-serif; background-color: #f8f9fa; margin: 0; padding: 0;">
@@ -120,8 +123,8 @@ async def start_rabbitmq_consumer(app: FastAPI):
             channel = await connection.channel()
             await channel.set_qos(prefetch_count=10)
 
-            queue = await channel.declare_queue(RABBITMQ_QUEUE, durable=True)
-            logger.info(f"✅ RabbitMQ consumer started. Listening on queue: '{RABBITMQ_QUEUE}'")
+            queue = await channel.declare_queue(RABBITMQ_QUEUE_EMAIL_VERIFICATION, durable=True)
+            logger.info(f"✅ RabbitMQ consumer started. Listening on queue: '{RABBITMQ_QUEUE_EMAIL_VERIFICATION}'")
 
             async with queue.iterator() as queue_iter:
                 async for message in queue_iter:
@@ -221,10 +224,10 @@ async def send_verification(request: VerificationRequest):
             detail="Email service misconfigured: Brevo API Key is missing."
         )
 
-    # 🔗 Replicate exact ResumeMaker verification URL format
-    verify_link = f"http://localhost:5173/verify?token={request.token}"
+    # Build verification URL
+    verify_link = f"https://resume-maker-pro.netlify.app/verify?token={request.token}"
     
-    # 🧩 Beautifully styled HTML template exactly matching the original Java implementation
+    # Styled HTML email template
     html_content = f"""
     <html>
       <body style="font-family: Arial, sans-serif; background-color: #f8f9fa; margin: 0; padding: 0;">
@@ -234,7 +237,7 @@ async def send_verification(request: VerificationRequest):
               <h1 style="color: #1a73e8; font-size: 28px; margin-bottom: 20px;">Verify Your Email</h1>
               <p style="font-size: 18px; color: #333;">Hi there 👋,</p>
               <p style="font-size: 16px; color: #555;">
-                Thank you for signing up with <strong>Resume Maker</strong>!<br>
+                Thank you for signing up!<br/>
                 Please verify your email address to activate your account.
               </p>
               <p style="margin: 30px 0;">
@@ -265,7 +268,7 @@ async def send_verification(request: VerificationRequest):
             "name": SENDER_NAME
         },
         "to": [{"email": request.email}],
-        "subject": "Verify your Resume Maker account",
+        "subject": "Verify your account",
         "htmlContent": html_content
     }
 
