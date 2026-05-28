@@ -33,7 +33,7 @@ RABBITMQ_USERNAME = os.getenv("RABBITMQ_USERNAME", "guest")
 RABBITMQ_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "guest")
 # Queue names for different purposes
 RABBITMQ_QUEUE_EMAIL_VERIFICATION = os.getenv("RABBITMQ_QUEUE_EMAIL_VERIFICATION", "email_verification_resumemaker")
-RABBITMQ_QUEUE_RESUMEMAKER = os.getenv("RABBITMQ_QUEUE_RESUMEMAKER", "email_verification_resumemaker")
+RABBITMQ_QUEUE_RESUMEMAKER = os.getenv("RABBITMQ_QUEUE_RESUMEMAKER", "email_resumemaker_queue")
 
 if not BREVO_API_KEY:
     logger.warning("BREVO_API_KEY is not defined in environment variables!")
@@ -111,7 +111,7 @@ async def process_verification_message(message: aio_pika.abc.AbstractIncomingMes
 
 
 async def start_rabbitmq_consumer(app: FastAPI):
-    """Connect to RabbitMQ and start consuming from the verification queue."""
+    """Connect to RabbitMQ and start consuming from the Resume Maker queue."""
     rabbitmq_url = f"amqp://{RABBITMQ_USERNAME}:{RABBITMQ_PASSWORD}@{RABBITMQ_HOST}:{RABBITMQ_PORT}/"
     logger.info(f"🔐 RabbitMQ credentials - username: {RABBITMQ_USERNAME}, password: {RABBITMQ_PASSWORD}")
     retry_delay = 5
@@ -123,8 +123,8 @@ async def start_rabbitmq_consumer(app: FastAPI):
             channel = await connection.channel()
             await channel.set_qos(prefetch_count=10)
 
-            queue = await channel.declare_queue(RABBITMQ_QUEUE_EMAIL_VERIFICATION, durable=True)
-            logger.info(f"✅ RabbitMQ consumer started. Listening on queue: '{RABBITMQ_QUEUE_EMAIL_VERIFICATION}'")
+            queue = await channel.declare_queue(RABBITMQ_QUEUE_RESUMEMAKER, durable=True)
+            logger.info(f"✅ RabbitMQ consumer started. Listening on queue: '{RABBITMQ_QUEUE_RESUMEMAKER}'")
 
             async with queue.iterator() as queue_iter:
                 async for message in queue_iter:
