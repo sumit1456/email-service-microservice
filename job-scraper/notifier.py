@@ -171,7 +171,8 @@ def send_notification(jobs: List[Dict[str, Any]], db: Any = None):
         "subject": subject,
         "html_content": html_content,
         "sender_name": config.SENDER_NAME,
-        "sender_email": config.SENDER_EMAIL
+        "sender_email": config.SENDER_EMAIL,
+        "jobs": jobs
     }
     
     headers = {

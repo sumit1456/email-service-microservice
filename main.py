@@ -34,6 +34,9 @@ RABBITMQ_PASSWORD = os.getenv("RABBITMQ_PASSWORD", "guest")
 # Queue names for different purposes
 RABBITMQ_QUEUE_EMAIL_VERIFICATION = os.getenv("RABBITMQ_QUEUE_EMAIL_VERIFICATION", "email_verification_resumemaker")
 RABBITMQ_QUEUE_RESUMEMAKER = os.getenv("RABBITMQ_QUEUE_RESUMEMAKER", "email_resumemaker_queue")
+RABBITMQ_QUEUE_JOBALERTS = os.getenv("RABBITMQ_QUEUE_JOBALERTS", "jobalerts")
+RUN_SCRAPER_BACKGROUND = os.getenv("RUN_SCRAPER_BACKGROUND", "false").lower() == "true"
+SCRAPER_MIN_RUN_INTERVAL = int(os.getenv("SCRAPER_MIN_RUN_INTERVAL", "10"))
 
 if not BREVO_API_KEY:
     logger.warning("BREVO_API_KEY is not defined in environment variables!")
@@ -141,6 +144,44 @@ async def start_rabbitmq_consumer(app: FastAPI):
             await asyncio.sleep(retry_delay)
 
 
+async def run_scraper_background_loop(app: FastAPI):
+    """Background task to run the job scraper at configured intervals."""
+    logger.info("⏳ Background job-scraper thread runner started.")
+    # Wait 10 seconds before first run to let everything initialize
+    await asyncio.sleep(10)
+    
+    import sys
+    import os
+    import importlib.util
+    
+    scraper_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "job-scraper")
+    module_path = os.path.join(scraper_dir, "main.py")
+    
+    if scraper_dir not in sys.path:
+        sys.path.insert(0, scraper_dir)
+        
+    try:
+        spec = importlib.util.spec_from_file_location("job_scraper_main", module_path)
+        job_scraper_main = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(job_scraper_main)
+        run_job_scraper = job_scraper_main.run_job_scraper
+    except Exception as e:
+        logger.error(f"❌ Could not import run_job_scraper: {e}")
+        return
+
+    while True:
+        try:
+            logger.info("⚡ Background Scraper: Triggering scheduled job scraper run...")
+            # run_job_scraper is synchronous and does network IO. Use to_thread to avoid blocking event loop.
+            await asyncio.to_thread(run_job_scraper)
+        except Exception as e:
+            logger.error(f"❌ Error during background scraper execution: {e}")
+            
+        sleep_seconds = SCRAPER_MIN_RUN_INTERVAL * 60
+        logger.info(f"⏳ Background Scraper: Next run scheduled in {SCRAPER_MIN_RUN_INTERVAL} minutes.")
+        await asyncio.sleep(sleep_seconds)
+
+
 # Lifespan manager to manage the HTTP client and RabbitMQ consumer lifecycle
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -156,20 +197,50 @@ async def lifespan(app: FastAPI):
     )
     logger.info("🚀 HTTP Client for Brevo API successfully initialized.")
 
+    # Setup RabbitMQ Connection for publishing
+    rabbitmq_url = f"amqp://{RABBITMQ_USERNAME}:{RABBITMQ_PASSWORD}@{RABBITMQ_HOST}:{RABBITMQ_PORT}/"
+    try:
+        app.state.rabbitmq_connection = await aio_pika.connect_robust(rabbitmq_url)
+        app.state.rabbitmq_channel = await app.state.rabbitmq_connection.channel()
+        await app.state.rabbitmq_channel.declare_queue(RABBITMQ_QUEUE_JOBALERTS, durable=True)
+        logger.info(f"✅ RabbitMQ publisher started. Ready to publish to queue: '{RABBITMQ_QUEUE_JOBALERTS}'")
+    except Exception as e:
+        logger.error(f"❌ Failed to connect to RabbitMQ for publishing: {e}")
+        app.state.rabbitmq_connection = None
+        app.state.rabbitmq_channel = None
+
     # Start the RabbitMQ consumer as a background task
     consumer_task = asyncio.create_task(start_rabbitmq_consumer(app))
     logger.info("🐇 RabbitMQ consumer background task launched.")
 
+    # Start the background scraper task if enabled
+    scraper_task = None
+    if RUN_SCRAPER_BACKGROUND:
+        scraper_task = asyncio.create_task(run_scraper_background_loop(app))
+        logger.info("⚡ Background job scraper task launched.")
+
     yield
 
-    # Clean up: cancel consumer and close HTTP client
+    # Clean up: cancel tasks and close connections
     consumer_task.cancel()
+    if scraper_task:
+        scraper_task.cancel()
+        
     try:
         await consumer_task
+        if scraper_task:
+            await scraper_task
     except asyncio.CancelledError:
         pass
+        
     await app.state.http_client.aclose()
+    
+    if app.state.rabbitmq_connection:
+        await app.state.rabbitmq_connection.close()
+        logger.info("🛑 RabbitMQ publisher connection closed.")
+        
     logger.info("🛑 HTTP Client and RabbitMQ consumer successfully closed.")
+
 
 app = FastAPI(
     title="Independent Email Microservice",
@@ -194,6 +265,8 @@ class GenericEmailRequest(BaseModel):
     html_content: str = Field(..., min_length=1, description="HTML content body of the email")
     sender_name: Optional[str] = Field(None, description="Custom sender name (defaults to SENDER_NAME)")
     sender_email: Optional[EmailStr] = Field(None, description="Custom sender email (defaults to SENDER_EMAIL)")
+    jobs: Optional[List[dict]] = Field(None, description="Optional raw list of jobs for downstream queues")
+
 
 # ─── ENDPOINTS ──────────────────────────────────────────────────────────────
 
@@ -332,6 +405,26 @@ async def send_generic_email(request: GenericEmailRequest):
         
         if response.status_code in (status.HTTP_200_OK, status.HTTP_201_CREATED, status.HTTP_202_ACCEPTED):
             logger.info(f"✅ Generic email successfully sent to {request.to_email}. Brevo Response: {response.text}")
+            
+            # If jobs list is present, publish the details to RabbitMQ jobalerts queue
+            if request.jobs and hasattr(app.state, "rabbitmq_channel") and app.state.rabbitmq_channel:
+                try:
+                    message_payload = {
+                        "to_email": request.to_email,
+                        "subject": request.subject,
+                        "jobs": request.jobs
+                    }
+                    await app.state.rabbitmq_channel.default_exchange.publish(
+                        aio_pika.Message(
+                            body=json.dumps(message_payload).encode(),
+                            delivery_mode=aio_pika.DeliveryMode.PERSISTENT
+                        ),
+                        routing_key=RABBITMQ_QUEUE_JOBALERTS
+                    )
+                    logger.info(f"📬 Successfully published {len(request.jobs)} jobs to RabbitMQ queue: '{RABBITMQ_QUEUE_JOBALERTS}'")
+                except Exception as e:
+                    logger.error(f"❌ Failed to publish job alert to RabbitMQ: {e}")
+
             return {
                 "success": True,
                 "message": f"Email sent successfully to {request.to_email}",
