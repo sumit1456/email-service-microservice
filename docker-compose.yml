@@ -25,7 +25,6 @@ services:
       - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
       - RABBITMQ_QUEUE_RESUMEMAKER=${RABBITMQ_QUEUE_RESUMEMAKER}
 
-  # ✉️ FastAPI Email Microservice
   email-service:
     image: sumit067hatekar/email-service:latest
     container_name: email-service
@@ -33,14 +32,16 @@ services:
     ports:
       - "8081:8081"
     mem_limit: 150m
+    env_file: ./.env          # load all variables from .env
     environment:
-      - BREVO_API_KEY=${BREVO_API_KEY}
       - SENDER_EMAIL=${SENDER_EMAIL}
       - SENDER_NAME=${SENDER_NAME}
+      - BREVO_API_KEY=${BREVO_API_KEY}
       - RABBITMQ_HOST=${RABBITMQ_HOST}
       - RABBITMQ_PORT=${RABBITMQ_PORT}
       - RABBITMQ_USERNAME=${RABBITMQ_USERNAME}
       - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD}
-      - RABBITMQ_QUEUE_EMAIL_VERIFICATION=${RABBITMQ_QUEUE_EMAIL_VERIFICATION}
       - RABBITMQ_QUEUE_RESUMEMAKER=${RABBITMQ_QUEUE_RESUMEMAKER}
-
+      - RUN_SCRAPER_BACKGROUND=${RUN_SCRAPER_BACKGROUND}
+      - SCRAPER_MIN_RUN_INTERVAL=${SCRAPER_MIN_RUN_INTERVAL}
+      - RABBITMQ_QUEUE_JOBALERTS=${RABBITMQ_QUEUE_JOBALERTS}
