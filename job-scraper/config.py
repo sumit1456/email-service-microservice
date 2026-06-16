@@ -115,4 +115,7 @@ MIN_RUN_INTERVAL_MINUTES = int(os.getenv("SCRAPER_MIN_RUN_INTERVAL", "60"))
 # Maximum number of email digests allowed to be sent per day (e.g. Brevo free tier limit is 300)
 MAX_EMAILS_PER_DAY = int(os.getenv("SCRAPER_MAX_EMAILS_PER_DAY", "200"))
 
-
+# --- ZENROWS CONFIGURATION ---
+# Set ZENROWS_ENABLED=true in .env to use ZenRows for JS-heavy / Cloudflare-protected sites
+ZENROWS_ENABLED = os.getenv("ZENROWS_ENABLED", "false").lower() == "true"
+ZENROWS_API_KEY = os.getenv("ZenROWS_API_KEY", "")

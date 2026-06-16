@@ -2,11 +2,12 @@ import re
 import time
 import urllib.parse
 import xml.etree.ElementTree as ET
-import requests
+import requests as std_requests
 from bs4 import BeautifulSoup
+from curl_cffi import requests as cffi_requests
 import config
 
-# Standard browser headers to prevent basic scraping blocks
+# Standard browser headers (fallback only)
 DEFAULT_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
@@ -22,21 +23,72 @@ def clean_text(text: str) -> str:
         return ""
     return re.sub(r'\s+', ' ', text).strip()
 
-def fetch_html(url: str, headers: dict = None) -> str:
-    """Helper to fetch URL HTML with retries and delay."""
-    req_headers = headers or DEFAULT_HEADERS
-    for attempt in range(3):
+def fetch_with_zenrows(url: str, js_render: bool = True) -> str:
+    """Fetches a URL through ZenRows API (uses credits). Only called when ZENROWS_ENABLED=true."""
+    if not config.ZENROWS_ENABLED or not config.ZENROWS_API_KEY:
+        print(f"[SKIP] ZenRows is disabled or key missing. Skipping {url}")
+        return ""
+    zenrows_url = "https://api.zenrows.com/v1/"
+    params = {
+        "apikey": config.ZENROWS_API_KEY,
+        "url": url,
+        "js_render": "true" if js_render else "false",
+    }
+    try:
+        response = std_requests.get(zenrows_url, params=params, timeout=60)
+        if response.status_code == 200:
+            print(f"[ZENROWS] Successfully fetched {url}")
+            return response.text
+        else:
+            print(f"[ZENROWS] Failed with code {response.status_code}: {response.text[:200]}")
+            return ""
+    except Exception as e:
+        print(f"[ZENROWS] Error fetching {url}: {e}")
+        return ""
+
+def fetch_html(url: str, use_zenrows: bool = False, js_render: bool = False) -> str:
+    """
+    Tiered fetch strategy:
+      1. curl_cffi  — lightweight Chrome TLS impersonation (free, no credits)
+      2. ZenRows    — JS-rendering API (costs credits, only if use_zenrows=True AND ZENROWS_ENABLED=True)
+      3. std requests fallback — plain requests (last resort)
+    """
+    # --- Tier 1: curl_cffi (free, impersonates Chrome TLS) ---
+    for attempt in range(2):
         try:
-            response = requests.get(url, headers=req_headers, timeout=15)
+            response = cffi_requests.get(url, impersonate="chrome", timeout=15)
+            if response.status_code == 200:
+                # Check for actual block (not just cloudflare text in footer etc.)
+                if "challenge-platform" not in response.text and "cf-challenge" not in response.text:
+                    return response.text
+                else:
+                    print(f"[WARN] curl_cffi got Cloudflare JS challenge on {url}")
+                    break  # No point retrying, go to next tier
+            elif response.status_code == 403:
+                print(f"[WARN] curl_cffi got 403 on {url}. Trying next tier.")
+                break
+        except Exception as e:
+            print(f"[WARN] curl_cffi error on {url} attempt {attempt+1}: {e}")
+        time.sleep(config.REQUEST_DELAY)
+
+    # --- Tier 2: ZenRows (only for sites that need JS rendering and when enabled) ---
+    if use_zenrows and config.ZENROWS_ENABLED and config.ZENROWS_API_KEY:
+        print(f"[INFO] Falling back to ZenRows for {url}")
+        html = fetch_with_zenrows(url, js_render=js_render)
+        if html:
+            return html
+
+    # --- Tier 3: Plain requests fallback ---
+    print(f"[WARN] All tiers failed or skipped for {url}. Trying plain requests fallback.")
+    for attempt in range(2):
+        try:
+            response = std_requests.get(url, headers=DEFAULT_HEADERS, timeout=15)
             if response.status_code == 200:
                 return response.text
-            elif response.status_code == 403:
-                print(f"[WARN] HTTP 403 Forbidden for {url}")
-            else:
-                print(f"[WARN] HTTP {response.status_code} for {url} on attempt {attempt+1}")
         except Exception as e:
-            print(f"[WARN] Error fetching {url} on attempt {attempt+1}: {e}")
+            print(f"[WARN] Plain requests error on {url} attempt {attempt+1}: {e}")
         time.sleep(config.REQUEST_DELAY)
+
     return ""
 
 # --- SCRAPER FUNCTIONS ---
@@ -115,18 +167,8 @@ def scrape_naukri() -> list:
     # Using clean search page query parameter
     url = "https://www.naukri.com/java-internship-jobs"
     
-    # Naukri has strict user agent checks and requires common headers
-    naukri_headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://www.google.com/",
-        "Sec-Ch-Ua": '"Google Chrome";v="119", "Chromium";v="119", "Not?A_Brand";v="24"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"Windows"'
-    }
-    
-    html = fetch_html(url, headers=naukri_headers)
+    # curl_cffi handles TLS fingerprinting for Naukri — no custom headers needed
+    html = fetch_html(url)
     if not html:
         return jobs
 
@@ -244,21 +286,14 @@ def scrape_wellfound() -> list:
     """Scrapes Wellfound (AngelList) or uses fallback parsing."""
     print("[SCRAPE] Scraping Wellfound (AngelList)...")
     jobs = []
-    # Wellfound is highly protected by Cloudflare. 
-    # We scrape their public role page for java internships, but use a try-except to avoid block crashes.
+    # Wellfound is heavily protected by Cloudflare JS challenge — requires ZenRows with JS rendering.
     url = "https://wellfound.com/role/l/java-developer-internship"
     
-    # Simulated browser headers for Wellfound
-    wellfound_headers = {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.5",
-        "DNT": "1",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1"
-    }
+    if not config.ZENROWS_ENABLED:
+        print("[SKIP] Wellfound requires ZenRows (ZENROWS_ENABLED=false). Skipping.")
+        return jobs
     
-    html = fetch_html(url, headers=wellfound_headers)
+    html = fetch_html(url, use_zenrows=True, js_render=True)
     if not html:
         return jobs
 
@@ -318,8 +353,9 @@ def scrape_cutshort() -> list:
     print("[SCRAPE] Scraping Cutshort...")
     jobs = []
     # Cutshort search path
+    # Cutshort is a React SPA — needs JS rendering via ZenRows to get listings.
     url = "https://cutshort.io/jobs/java-internship"
-    html = fetch_html(url)
+    html = fetch_html(url, use_zenrows=True, js_render=True)
     if not html:
         return jobs
 
@@ -376,7 +412,7 @@ def scrape_we_work_remotely() -> list:
     url = "https://weworkremotely.com/categories/remote-programming-jobs.rss"
     
     try:
-        response = requests.get(url, headers=DEFAULT_HEADERS, timeout=15)
+        response = std_requests.get(url, headers=DEFAULT_HEADERS, timeout=15)
         if response.status_code == 200:
             root = ET.fromstring(response.content)
             for item in root.findall(".//item"):
@@ -418,7 +454,7 @@ def scrape_remotive() -> list:
     url = "https://remotive.com/api/remote-jobs?category=software-development"
     
     try:
-        response = requests.get(url, headers=DEFAULT_HEADERS, timeout=15)
+        response = std_requests.get(url, headers=DEFAULT_HEADERS, timeout=15)
         if response.status_code == 200:
             data = response.json()
             raw_jobs = data.get("jobs", [])
@@ -449,7 +485,7 @@ def scrape_hacker_news() -> list:
     url = "https://hn.algolia.com/api/v1/search?query=java+intern&tags=comment"
     
     try:
-        response = requests.get(url, headers=DEFAULT_HEADERS, timeout=15)
+        response = std_requests.get(url, headers=DEFAULT_HEADERS, timeout=15)
         if response.status_code == 200:
             hits = response.json().get("hits", [])
             for hit in hits:

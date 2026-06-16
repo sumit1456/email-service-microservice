@@ -66,8 +66,9 @@ def matches_filters(job: Dict[str, Any]) -> bool:
     if config.FILTER_LOCATIONS:
         has_matching_location = False
         
-        # Check aliases for remote
-        is_job_remote = any(x in location for x in ["remote", "work from home", "wfh", "anywhere", "home"])
+        # Extended aliases: treat worldwide/global/india/anywhere as remote-friendly
+        remote_aliases = ["remote", "work from home", "wfh", "anywhere", "home", "worldwide", "global", "india", "any location", "location independent"]
+        is_job_remote = any(x in location for x in remote_aliases)
         
         for loc in config.FILTER_LOCATIONS:
             if loc == "remote" and is_job_remote:

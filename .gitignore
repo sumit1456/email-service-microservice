@@ -153,3 +153,7 @@ Thumbs.db
 # Local documentation (ignored)
 payload_docs.txt
 
+# Job scraper deduplication database — must NOT be committed.
+# EC2 must start with a fresh DB so all jobs are treated as new on first run.
+*.db
+job-scraper/seen_listings.db
