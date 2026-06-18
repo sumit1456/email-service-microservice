@@ -166,6 +166,26 @@ class DeduplicationDB:
         finally:
             cursor.close()
 
+    def clear_all_data(self):
+        """Clears all seen listings and resets metadata (daily limits, last run timestamps)."""
+        cursor = self.conn.cursor()
+        try:
+            print("[DB] Clearing all seen listings and metadata...")
+            if self.use_postgres:
+                cursor.execute("TRUNCATE TABLE seen_listings CASCADE;")
+                cursor.execute("TRUNCATE TABLE scraper_metadata CASCADE;")
+            else:
+                cursor.execute("DELETE FROM seen_listings;")
+                cursor.execute("DELETE FROM scraper_metadata;")
+                self.conn.commit()
+            print("[DB] Database cleared successfully.")
+        except Exception as e:
+            print(f"[ERROR] Error clearing database: {e}")
+            if not self.use_postgres:
+                self.conn.rollback()
+        finally:
+            cursor.close()
+
     def close(self):
         """Closes the connection to the database."""
         if self.conn:

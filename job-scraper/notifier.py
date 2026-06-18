@@ -15,13 +15,20 @@ def build_job_card_html(job: Dict[str, Any]) -> str:
 
     # Set badge colors based on platform
     source_colors = {
-        "Internshala": {"bg": "#e0f2fe", "text": "#0369a1"}, # light blue
-        "Naukri": {"bg": "#fef3c7", "text": "#b45309"},      # amber
-        "Wellfound": {"bg": "#f3e8ff", "text": "#6b21a8"},    # purple
-        "Cutshort": {"bg": "#dcfce7", "text": "#15803d"},     # green
-        "We Work Remotely": {"bg": "#ffedd5", "text": "#c2410c"}, # orange
-        "Remotive": {"bg": "#e0e7ff", "text": "#4338ca"},     # indigo
-        "Hacker News": {"bg": "#ffebd6", "text": "#d84315"}   # deep orange
+        "Internshala":     {"bg": "#e0f2fe", "text": "#0369a1"},  # light blue
+        "Naukri":          {"bg": "#fef3c7", "text": "#b45309"},  # amber
+        "Wellfound":       {"bg": "#f3e8ff", "text": "#6b21a8"},  # purple
+        "Cutshort":        {"bg": "#dcfce7", "text": "#15803d"},  # green
+        "We Work Remotely":{"bg": "#ffedd5", "text": "#c2410c"},  # orange
+        "Remotive":        {"bg": "#e0e7ff", "text": "#4338ca"},  # indigo
+        "Hacker News":     {"bg": "#ffebd6", "text": "#d84315"},  # deep orange
+        # ── New platforms ─────────────────────────────────────────
+        "Remote OK":       {"bg": "#d1fae5", "text": "#065f46"},  # emerald
+        "Arbeitnow":       {"bg": "#fce7f3", "text": "#9d174d"},  # pink
+        "Jobicy":          {"bg": "#ede9fe", "text": "#5b21b6"},  # violet
+        "Unstop":          {"bg": "#fff7ed", "text": "#c2410c"},  # warm orange
+        "Indeed India":    {"bg": "#dbeafe", "text": "#1d4ed8"},  # blue
+        "YC Startups":     {"bg": "#fef9c3", "text": "#854d0e"},  # yellow
     }
 
     colors = source_colors.get(source, {"bg": "#f3f4f6", "text": "#374151"})

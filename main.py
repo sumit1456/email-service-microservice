@@ -182,6 +182,86 @@ async def run_scraper_background_loop(app: FastAPI):
         await asyncio.sleep(sleep_seconds)
 
 
+async def run_keep_alive_ping_loop(app: FastAPI):
+    """Background task to ping registered URLs every 3 minutes to keep them alive."""
+    # List of URLs to ping
+    urls_to_ping = [
+        "https://webapp-w7f4.onrender.com/ping"
+    ]
+    
+    logger.info(f"🌐 Keep-Alive Ping worker started. Monitoring {len(urls_to_ping)} URLs.")
+    
+    while True:
+        try:
+            # Wait 3 minutes (180 seconds)
+            await asyncio.sleep(180)
+            
+            logger.info(f"🌐 Keep-Alive: Pinging {len(urls_to_ping)} registered URLs...")
+            for url in urls_to_ping:
+                try:
+                    # Perform async GET request to each URL
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        response = await client.get(url)
+                        logger.info(f"🌐 Keep-Alive: Pinged {url} -> Status Code: {response.status_code}")
+                except Exception as e:
+                    logger.error(f"❌ Keep-Alive: Failed to ping {url}. Error: {e}")
+                    
+        except asyncio.CancelledError:
+            logger.info("🛑 Keep-Alive Ping task cancelled. Shutting down...")
+            break
+        except Exception as e:
+            logger.error(f"❌ Unexpected error in Keep-Alive Ping task: {e}")
+
+
+async def run_daily_cleanup_loop(app: FastAPI):
+    """Background task to clear database and reset daily limits at 11:00 PM everyday."""
+    import datetime
+    import sys
+    import os
+    
+    logger.info("📅 Daily database cleanup/reset worker started.")
+    
+    # Ensure scraper_dir is in sys.path so we can import DeduplicationDB
+    scraper_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "job-scraper")
+    if scraper_dir not in sys.path:
+        sys.path.insert(0, scraper_dir)
+        
+    from db import DeduplicationDB
+    
+    while True:
+        try:
+            now = datetime.datetime.now()
+            # Target is today at 23:00 (11:00 PM)
+            target = now.replace(hour=23, minute=0, second=0, microsecond=0)
+            
+            # If 11:00 PM has already passed today, target is 11:00 PM tomorrow
+            if now >= target:
+                target += datetime.timedelta(days=1)
+                
+            sleep_seconds = (target - now).total_seconds()
+            logger.info(f"📅 Daily Cleanup: Next database reset scheduled at {target} (in {sleep_seconds:.1f} seconds)")
+            
+            await asyncio.sleep(sleep_seconds)
+            
+            # Perform cleanup
+            logger.info("🧹 Daily Cleanup: Executing daily database clearing (11:00 PM)...")
+            db = DeduplicationDB()
+            # Run cleanup in a thread to prevent blocking event loop
+            await asyncio.to_thread(db.clear_all_data)
+            db.close()
+            logger.info("✅ Daily Cleanup: Database tables and daily limits successfully cleared/reset.")
+            
+            # Sleep 60 seconds to avoid double triggering in the same minute
+            await asyncio.sleep(60)
+            
+        except asyncio.CancelledError:
+            logger.info("🛑 Daily Cleanup task cancelled. Shutting down...")
+            break
+        except Exception as e:
+            logger.error(f"❌ Error in Daily Cleanup task: {e}")
+            await asyncio.sleep(60)
+
+
 # Lifespan manager to manage the HTTP client and RabbitMQ consumer lifecycle
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -219,17 +299,29 @@ async def lifespan(app: FastAPI):
         scraper_task = asyncio.create_task(run_scraper_background_loop(app))
         logger.info("⚡ Background job scraper task launched.")
 
+    # Start the daily database cleanup task
+    cleanup_task = asyncio.create_task(run_daily_cleanup_loop(app))
+    logger.info("📅 Daily database cleanup/reset task launched.")
+
+    # Start the keep-alive ping task
+    ping_task = asyncio.create_task(run_keep_alive_ping_loop(app))
+    logger.info("🌐 Keep-Alive ping task launched.")
+
     yield
 
     # Clean up: cancel tasks and close connections
     consumer_task.cancel()
     if scraper_task:
         scraper_task.cancel()
+    cleanup_task.cancel()
+    ping_task.cancel()
         
     try:
         await consumer_task
         if scraper_task:
             await scraper_task
+        await cleanup_task
+        await ping_task
     except asyncio.CancelledError:
         pass
         
