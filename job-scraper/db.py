@@ -10,35 +10,17 @@ except ImportError:
 
 class DeduplicationDB:
     def __init__(self):
-        self.db_params = get_db_connection_params()
         self.use_postgres = False
         self.conn = None
         
-        # Try connecting to PostgreSQL if parameters are defined
-        if self.db_params:
-            if HAS_PSYCOPG2:
-                try:
-                    # Test connection
-                    self.conn = psycopg2.connect(**self.db_params)
-                    self.conn.autocommit = True
-                    self.use_postgres = True
-                    print(f"[OK] Successfully connected to PostgreSQL database: {self.db_params['database']} on {self.db_params['host']}")
-                except Exception as e:
-                    print(f"[WARN] Failed to connect to PostgreSQL ({e}). Falling back to SQLite.")
-                    self.conn = None
-            else:
-                print("[WARN] DB_URL is configured but 'psycopg2' is not installed. Run 'pip install psycopg2-binary' to enable PostgreSQL database support. Falling back to SQLite.")
-                
-        # SQLite fallback
-        if not self.use_postgres:
-            db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seen_listings.db")
-            try:
-                self.conn = sqlite3.connect(db_path, check_same_thread=False)
-                # SQLite autocommit equivalent or we commit manually
-                print(f"[DB] Using SQLite database at: {db_path}")
-            except Exception as e:
-                print(f"[ERROR] Error initializing SQLite database: {e}")
-                raise e
+        # SQLite database
+        db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "seen_listings.db")
+        try:
+            self.conn = sqlite3.connect(db_path, check_same_thread=False)
+            print(f"[DB] Using SQLite database at: {db_path}")
+        except Exception as e:
+            print(f"[ERROR] Error initializing SQLite database: {e}")
+            raise e
 
         self.init_table()
 
