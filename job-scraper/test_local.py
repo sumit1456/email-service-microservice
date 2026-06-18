@@ -14,10 +14,50 @@ def test_filters():
                 "location": "Pune, India",
                 "description": "Looking for a software intern with strong Java skills. Spring Boot is a plus.",
                 "stipend": "10,000 /month",
-                "url": "https://example.com/job1"
+                "url": "https://example.com/job1",
+                "posted_date": "Recently"
             },
             "expected": True,
-            "reason": "Java + Intern + Pune"
+            "reason": "Java + Intern + Pune (Date: Recently)"
+        },
+        {
+            "job": {
+                "title": "Java Developer Intern",
+                "company": "Tech Solutions",
+                "location": "Pune, India",
+                "description": "Looking for a software intern with strong Java skills. Spring Boot is a plus.",
+                "stipend": "10,000 /month",
+                "url": "https://example.com/job_stale",
+                "posted_date": "2020-03-24"
+            },
+            "expected": False,
+            "reason": "Filtered out (Date is stale: 2020-03-24)"
+        },
+        {
+            "job": {
+                "title": "Java Developer Intern",
+                "company": "Tech Solutions",
+                "location": "Pune, India",
+                "description": "Looking for a software intern with strong Java skills. Spring Boot is a plus.",
+                "stipend": "10,000 /month",
+                "url": "https://example.com/job_stale_2",
+                "posted_date": "31 days ago"
+            },
+            "expected": False,
+            "reason": "Filtered out (Date is stale: 31 days ago)"
+        },
+        {
+            "job": {
+                "title": "Java Developer Intern",
+                "company": "Tech Solutions",
+                "location": "Pune, India",
+                "description": "Looking for a software intern with strong Java skills. Spring Boot is a plus.",
+                "stipend": "10,000 /month",
+                "url": "https://example.com/job_recent_1",
+                "posted_date": "2 days ago"
+            },
+            "expected": True,
+            "reason": "Kept (Date is recent: 2 days ago)"
         },
         {
             "job": {
@@ -62,10 +102,11 @@ def test_filters():
                 "location": "Work From Home",
                 "description": "We need a Java developer trainee.",
                 "stipend": "12,000 /month",
-                "url": "https://example.com/job5"
+                "url": "https://example.com/job5",
+                "posted_date": "1 week ago"
             },
             "expected": True,
-            "reason": "Java + Co-op/Trainee + Remote alias (Work From Home)"
+            "reason": "Java + Co-op/Trainee + Remote alias (Work From Home) (Date: 1 week ago)"
         }
     ]
     

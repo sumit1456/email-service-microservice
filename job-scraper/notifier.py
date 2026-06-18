@@ -1,7 +1,9 @@
 import time
+import datetime
 import httpx
 from typing import List, Dict, Any
 import config
+from filter import _parse_posted_date
 
 def build_job_card_html(job: Dict[str, Any]) -> str:
     """Generates a premium glassmorphic HTML card for a single job listing."""
@@ -10,8 +12,33 @@ def build_job_card_html(job: Dict[str, Any]) -> str:
     location = job.get("location", "India / Remote")
     stipend = job.get("stipend", "Not Disclosed")
     posted_date = job.get("posted_date", "Recently")
-    url = job.get("url", "#")
+    url = job.get("url")
+    listing_url = job.get("listing_url")
     source = job.get("source", "Scraper")
+
+    if url == "#":
+        url = None
+    if listing_url == "#":
+        listing_url = None
+
+    # Check if the posting is very recent (<= 3 days)
+    is_new = False
+    if posted_date:
+        if posted_date.strip().lower() == "recently":
+            is_new = True
+        else:
+            try:
+                parsed_date = _parse_posted_date(posted_date)
+                if parsed_date:
+                    age_days = (datetime.date.today() - parsed_date).days
+                    if age_days <= 3:
+                        is_new = True
+            except Exception:
+                pass
+
+    new_badge = ""
+    if is_new:
+        new_badge = '<span style="background-color: #10b981; color: #ffffff; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px; display: inline-block; margin-left: 6px; text-transform: uppercase; vertical-align: middle;">New ✨</span>'
 
     # Set badge colors based on platform
     source_colors = {
@@ -32,6 +59,28 @@ def build_job_card_html(job: Dict[str, Any]) -> str:
     }
 
     colors = source_colors.get(source, {"bg": "#f3f4f6", "text": "#374151"})
+
+    # Determine action buttons HTML
+    buttons = []
+    if url:
+        buttons.append(f"""
+            <a href="{url}" target="_blank" style="background: linear-gradient(135deg, #6366f1, #4f46e5); color: #ffffff; padding: 8px 16px; font-size: 13px; font-weight: 700; text-decoration: none; border-radius: 6px; display: inline-block; text-align: center; margin-right: 10px; margin-bottom: 8px;">
+                Apply Now 🚀
+            </a>
+        """)
+    if listing_url and listing_url != url:
+        buttons.append(f"""
+            <a href="{listing_url}" target="_blank" style="background: #334155; border: 1px solid #475569; color: #f8fafc; padding: 8px 16px; font-size: 13px; font-weight: 700; text-decoration: none; border-radius: 6px; display: inline-block; text-align: center; margin-bottom: 8px;">
+                View Listing 🔗
+            </a>
+        """)
+    if not buttons:
+        buttons.append(f"""
+            <a href="#" style="background: #334155; color: #94a3b8; padding: 8px 16px; font-size: 13px; font-weight: 700; text-decoration: none; border-radius: 6px; display: inline-block; text-align: center; cursor: not-allowed; pointer-events: none;">
+                No Link Available
+            </a>
+        """)
+    buttons_html = "\n".join(buttons)
 
     return f"""
     <div style="background-color: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 20px; margin-bottom: 20px; font-family: 'Inter', sans-serif;">
@@ -58,7 +107,7 @@ def build_job_card_html(job: Dict[str, Any]) -> str:
                     <td style="padding-right: 15px;">💰 <strong>Stipend:</strong> {stipend}</td>
                 </tr>
                 <tr>
-                    <td colspan="2">📅 <strong>Posted:</strong> {posted_date}</td>
+                    <td colspan="2">📅 <strong>Posted:</strong> {posted_date}{new_badge}</td>
                 </tr>
             </table>
         </div>
@@ -67,9 +116,7 @@ def build_job_card_html(job: Dict[str, Any]) -> str:
         <table width="100%" cellpadding="0" cellspacing="0" style="margin-top: 15px; border-top: 1px solid #334155; padding-top: 15px;">
             <tr>
                 <td>
-                    <a href="{url}" target="_blank" style="background: linear-gradient(135deg, #6366f1, #4f46e5); color: #ffffff; padding: 8px 16px; font-size: 13px; font-weight: 700; text-decoration: none; border-radius: 6px; display: inline-block; text-align: center;">
-                        Apply Now 🚀
-                    </a>
+                    {buttons_html}
                 </td>
             </tr>
         </table>

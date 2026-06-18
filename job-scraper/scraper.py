@@ -151,6 +151,7 @@ def scrape_internshala() -> list:
                 "stipend": stipend,
                 "posted_date": posted_date,
                 "url": link,
+                "listing_url": link,
                 "source": "Internshala"
             })
         except Exception as e:
@@ -230,6 +231,7 @@ def scrape_naukri() -> list:
                                 "stipend": stipend,
                                 "posted_date": posted_date,
                                 "url": link,
+                                "listing_url": link,
                                 "source": "Naukri"
                             })
                     
@@ -273,6 +275,7 @@ def scrape_naukri() -> list:
                     "stipend": stipend,
                     "posted_date": posted_date,
                     "url": link,
+                    "listing_url": link,
                     "source": "Naukri"
                 })
             except Exception as e:
@@ -339,6 +342,7 @@ def scrape_wellfound() -> list:
                 "stipend": stipend,
                 "posted_date": "Recently",
                 "url": link or url,
+                "listing_url": link or url,
                 "source": "Wellfound"
             })
         except Exception as e:
@@ -396,6 +400,7 @@ def scrape_cutshort() -> list:
                 "stipend": stipend,
                 "posted_date": "Recently",
                 "url": link or url,
+                "listing_url": link or url,
                 "source": "Cutshort"
             })
         except Exception as e:
@@ -518,8 +523,8 @@ def scrape_hacker_news() -> list:
     story_ids = []
     try:
         stories_url = (
-            "https://hn.algolia.com/api/v1/search"
-            "?query=Ask+HN+Who+is+Hiring&tags=story&hitsPerPage=5"
+            "https://hn.algolia.com/api/v1/search_by_date"
+            "?query=Ask+HN+Who+is+Hiring&tags=story&hitsPerPage=15"
         )
         resp = std_requests.get(stories_url, headers=DEFAULT_HEADERS, timeout=15)
         if resp.status_code == 200:
@@ -584,6 +589,9 @@ def scrape_hacker_news() -> list:
                 if "|" in first_line:
                     company = clean_text(first_line.split("|")[0])
 
+                # HN listing link = the thread/comment permalink
+                hn_listing_url = f"https://news.ycombinator.com/item?id={object_id}" if object_id else f"https://news.ycombinator.com/item?id={story_id}"
+
                 jobs.append({
                     "title": first_line[:100],
                     "company": company,
@@ -592,6 +600,7 @@ def scrape_hacker_news() -> list:
                     "stipend": "Unspecified",
                     "posted_date": posted_date,
                     "url": apply_url,
+                    "listing_url": hn_listing_url,
                     "source": "Hacker News"
                 })
         except Exception as e:
@@ -641,6 +650,7 @@ def scrape_remoteok() -> list:
                     "stipend": "Remote Compensation",
                     "posted_date": date_str[:10] if date_str else "Recently",
                     "url": apply_url,
+                    "listing_url": apply_url,
                     "source": "Remote OK"
                 })
         else:
@@ -687,6 +697,7 @@ def scrape_arbeitnow() -> list:
                     "stipend": "Not Disclosed",
                     "posted_date": str(created_at)[:10] if created_at else "Recently",
                     "url": apply_url,
+                    "listing_url": apply_url,
                     "source": "Arbeitnow"
                 })
         else:
@@ -736,6 +747,7 @@ def scrape_jobicy() -> list:
                     "stipend": "Not Disclosed",
                     "posted_date": pub_date[:16],
                     "url": link,
+                    "listing_url": link,
                     "source": "Jobicy"
                 })
         else:
@@ -817,6 +829,7 @@ def scrape_unstop() -> list:
                     "stipend": stipend,
                     "posted_date": deadline,
                     "url": apply_url,
+                    "listing_url": apply_url,
                     "source": "Unstop"
                 })
         else:
@@ -913,6 +926,7 @@ def scrape_indeed_india() -> list:
                 "stipend": stipend,
                 "posted_date": posted_date,
                 "url": link,
+                "listing_url": link,
                 "source": "Indeed India"
             })
         except Exception as e:
@@ -990,6 +1004,7 @@ def scrape_yc_startups() -> list:
                 "stipend": stipend,
                 "posted_date": "Recently",
                 "url": link,
+                "listing_url": link,
                 "source": "YC Startups"
             })
         except Exception as e:
