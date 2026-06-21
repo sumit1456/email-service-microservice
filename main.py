@@ -186,7 +186,7 @@ async def run_keep_alive_ping_loop(app: FastAPI):
     """Background task to ping registered URLs every 3 minutes to keep them alive."""
     # List of URLs to ping
     urls_to_ping = [
-        "https://webapp-w7f4.onrender.com/ping"
+        "https://webapp-w7f4.onrender.com/ping", "https://my-images-python-backend.onrender.com"
     ]
     
     logger.info(f"🌐 Keep-Alive Ping worker started. Monitoring {len(urls_to_ping)} URLs.")
